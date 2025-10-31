@@ -1,13 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
-    {
-      "path": "/api/cron/fetch",
-      "schedule": "13 0 * * *"    // 6:00 AM Denver time (MST)
-    },
-    {
-      "path": "/api/cron/publish",
-      "schedule": "13 30 * * *"   // 6:30 AM Denver time (MST)
-    }
+    { "path": "/api/cron/fetch",   "schedule": "0 12 * * *" },
+    { "path": "/api/cron/publish", "schedule": "30 12 * * *" }
   ]
 }

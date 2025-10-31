@@ -1,7 +1,8 @@
 // =========================================
 // NEW: app/privacy/page.tsx — stub (linkable for verification)
 // =========================================
-export function metadata() { return { title: 'Privacy Policy — The Deal Navigator' }; }
+import type { Metadata } from 'next';
+export const metadata: Metadata = { title: 'Privacy Policy — The Deal Navigator' };
 export default function PrivacyPage() {
 return (
 <div className="prose max-w-2xl mx-auto">
@@ -12,8 +13,3 @@ return (
 </div>
 );
 }
-
-// =========================================
-// NOTE: If desired, add a tiny disclaimer under the subscribe form linking to /consent
-// (Example JSX snippet to include below the form submit button):
-// <p className="text-xs text-neutral-500 mt-1">By subscribing, you agree to our <a className="

@@ -1,7 +1,8 @@
 // =========================================
 // NEW: app/terms/page.tsx — stub (linkable for verification)
 // =========================================
-export function metadata() { return { title: 'Terms of Service — The Deal Navigator' }; }
+import type { Metadata } from 'next';
+export const metadata: Metadata = { title: 'Terms of Service — The Deal Navigator' };
 export default function TermsPage() {
 return (
 <div className="prose max-w-2xl mx-auto">

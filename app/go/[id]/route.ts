@@ -1,59 +1,60 @@
 // app/go/[id]/route.ts
-// @ts-nocheck
-import { NextResponse } from 'next/server';
+// No Next.js types on purpose to avoid version typing conflicts.
+
+import crypto from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabase';
 import { buildAffiliateUrl } from '@/lib/affiliates';
-import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Helper to normalize params whether it's a plain object or a Promise
+// Small helper to support Next variants where params might be a Promise
 function isPromiseLike(v: any): v is Promise<any> {
   return v && typeof v.then === 'function';
 }
 
-export async function GET(req: Request, context: any): Promise<Response> {
-  const raw = context?.params;
+export async function GET(req: Request, ctx: any): Promise<Response> {
+  const raw = ctx?.params;
   const params = isPromiseLike(raw) ? await raw : raw;
   const id: string | undefined = params?.id;
-  if (!id) return NextResponse.redirect('/', { status: 302 });
+  if (!id) return new Response(null, { status: 302, headers: { Location: '/' } });
 
-  const sb = supabaseAdmin();
   const url = new URL(req.url);
   const mParam = url.searchParams.get('m'); // merchant_id
   const channel = (url.searchParams.get('ch') || 'web') as 'web' | 'email' | 'sms';
 
-  // Try product id first
+  const sb = supabaseAdmin();
+
+  // Resolve productId (try product first, then legacy deal)
   let productId: string | null = null;
+
   const { data: productRow } = await sb.from('products').select('id').eq('id', id).maybeSingle();
   if (productRow?.id) {
     productId = productRow.id;
   } else {
-    // Fallback: legacy deal id
     const { data: deal } = await sb
       .from('deals')
       .select('id, product_id, url')
       .eq('id', id)
       .maybeSingle();
 
-    if (!deal) return NextResponse.redirect('/', { status: 302 });
+    if (!deal) return new Response(null, { status: 302, headers: { Location: '/' } });
 
     if (deal.product_id) {
       productId = deal.product_id;
     } else {
+      // Legacy: no product mapping yet — just log minimal click and bounce
       const clickId = crypto.randomBytes(8).toString('hex');
       await sb.from('clicks').insert({
         deal_id: id,
         channel,
         click_id: clickId,
-        ip: (url.searchParams.get('ip') || ''), // optional; usually use x-forwarded-for header in middleware
       });
-      return NextResponse.redirect(deal.url, { status: 302 });
+      return new Response(null, { status: 302, headers: { Location: deal.url } });
     }
   }
 
-  // Resolve offer (specific merchant or best)
+  // Pick offer (specific merchant or best)
   let offer: { merchant_id: number; url: string } | null = null;
 
   if (mParam) {
@@ -76,9 +77,9 @@ export async function GET(req: Request, context: any): Promise<Response> {
     if (data) offer = data;
   }
 
-  if (!offer) return NextResponse.redirect('/', { status: 302 });
+  if (!offer) return new Response(null, { status: 302, headers: { Location: '/' } });
 
-  // Load merchant for affiliate params
+  // Get merchant info for affiliate params
   const { data: merchant } = await sb
     .from('merchants')
     .select('id, domain, network, program_id')
@@ -88,9 +89,9 @@ export async function GET(req: Request, context: any): Promise<Response> {
   const clickId = crypto.randomBytes(8).toString('hex');
   const affiliateUrl = buildAffiliateUrl({
     merchant: {
-      network: merchant.network || undefined,
-      program_id: merchant.program_id || undefined,
-      domain: merchant.domain,
+      network: merchant?.network || undefined,
+      program_id: merchant?.program_id || undefined,
+      domain: merchant?.domain || '',
     },
     rawUrl: offer.url,
     clickId,
@@ -101,10 +102,10 @@ export async function GET(req: Request, context: any): Promise<Response> {
   await sb.from('clicks').insert({
     deal_id: null,
     product_id: productId,
-    merchant_id: merchant.id,
+    merchant_id: merchant?.id ?? null,
     channel,
     click_id: clickId,
   });
 
-  return NextResponse.redirect(affiliateUrl, { status: 302 });
+  return new Response(null, { status: 302, headers: { Location: affiliateUrl } });
 }

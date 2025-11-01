@@ -1,32 +1,91 @@
+// app/go/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { adminClient } from '../../../lib/supabase/admin';
+import { supabaseAdmin } from '@/lib/supabase';
+import { buildAffiliateUrl } from '@/lib/affiliates';
+import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const { id } = await context.params;
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const sb = supabaseAdmin();
+  const url = new URL(req.url);
+  const mParam = url.searchParams.get('m');  // merchant_id
+  const channel = (url.searchParams.get('ch') || 'web') as 'web'|'email'|'sms';
+  const id = params.id;
 
-  // Look up affiliate URL from Supabase
-  const { data: deal, error } = await adminClient
-    .from('deals_enriched')
-    .select('affiliate_url')
-    .eq('id', id)
-    .single();
-
-  if (error || !deal?.affiliate_url) {
-    return new NextResponse('Deal not found', { status: 404 });
+  // Try product id first
+  let productId: string | null = null;
+  const { data: productRow } = await sb.from('products').select('id').eq('id', id).maybeSingle();
+  if (productRow?.id) {
+    productId = productRow.id;
+  } else {
+    // Fallback: treat as deal id (legacy path)
+    const { data: deal } = await sb.from('deals').select('id, product_id, url').eq('id', id).maybeSingle();
+    if (!deal) return NextResponse.redirect('/', { status: 302 });
+    if (deal.product_id) productId = deal.product_id;
+    else {
+      const clickId = crypto.randomBytes(8).toString('hex');
+      await sb.from('clicks').insert({
+        deal_id: id,
+        channel,
+        click_id: clickId,
+        ip: (req.headers.get('x-forwarded-for') || '').split(',')[0] || null,
+        ua: req.headers.get('user-agent') || null,
+      });
+      return NextResponse.redirect(deal.url, { status: 302 });
+    }
   }
 
-  // Optional: lightweight click logging (no req.ip in Next 16)
-  const ipHeader = request.headers.get('x-forwarded-for') || '';
-  const ip = ipHeader.split(',')[0] || null;
-  const ua = request.headers.get('user-agent') || null;
-  // Fire-and-forget; ignore errors
-  // void adminClient.from('clicks').insert({ deal_id: id, ip, ua });
+  // Resolve offer (specific merchant or best)
+  let offer: { merchant_id: number; url: string } | null = null;
 
-  return NextResponse.redirect(deal.affiliate_url, { status: 302 });
+  if (mParam) {
+    const mId = Number(mParam);
+    const { data } = await sb
+      .from('product_offers')
+      .select('merchant_id, url')
+      .eq('product_id', productId)
+      .eq('merchant_id', mId)
+      .maybeSingle();
+    if (data) offer = data;
+  }
+
+  if (!offer) {
+    const { data } = await sb
+      .from('product_best_offer')
+      .select('merchant_id, url')
+      .eq('product_id', productId)
+      .maybeSingle();
+    if (data) offer = data;
+  }
+
+  if (!offer) return NextResponse.redirect('/', { status: 302 });
+
+  // Load merchant to build affiliate URL
+  const { data: merchant } = await sb
+    .from('merchants')
+    .select('id, domain, network, program_id')
+    .eq('id', offer.merchant_id)
+    .single();
+
+  const clickId = crypto.randomBytes(8).toString('hex');
+  const affiliateUrl = buildAffiliateUrl({
+    merchant: { network: merchant.network || undefined, program_id: merchant.program_id || undefined, domain: merchant.domain },
+    rawUrl: offer.url,
+    clickId,
+    channel,
+  });
+
+  // Log click
+  await sb.from('clicks').insert({
+    deal_id: null,
+    product_id: productId,
+    merchant_id: merchant.id,
+    channel,
+    click_id: clickId,
+    ip: (req.headers.get('x-forwarded-for') || '').split(',')[0] || null,
+    ua: req.headers.get('user-agent') || null,
+  });
+
+  return NextResponse.redirect(affiliateUrl, { status: 302 });
 }

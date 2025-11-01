@@ -5,13 +5,19 @@ import { buildAffiliateUrl } from '@/lib/affiliates';
 import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
+// optional: if you want to avoid caching for safety
+// export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> }
+): Promise<Response> {
+  const { id } = await context.params;
+
   const sb = supabaseAdmin();
   const url = new URL(req.url);
-  const mParam = url.searchParams.get('m');  // merchant_id
-  const channel = (url.searchParams.get('ch') || 'web') as 'web'|'email'|'sms';
-  const id = params.id;
+  const mParam = url.searchParams.get('m'); // merchant_id
+  const channel = (url.searchParams.get('ch') || 'web') as 'web' | 'email' | 'sms';
 
   // Try product id first
   let productId: string | null = null;
@@ -20,10 +26,17 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     productId = productRow.id;
   } else {
     // Fallback: treat as deal id (legacy path)
-    const { data: deal } = await sb.from('deals').select('id, product_id, url').eq('id', id).maybeSingle();
+    const { data: deal } = await sb
+      .from('deals')
+      .select('id, product_id, url')
+      .eq('id', id)
+      .maybeSingle();
+
     if (!deal) return NextResponse.redirect('/', { status: 302 });
-    if (deal.product_id) productId = deal.product_id;
-    else {
+
+    if (deal.product_id) {
+      productId = deal.product_id;
+    } else {
       const clickId = crypto.randomBytes(8).toString('hex');
       await sb.from('clicks').insert({
         deal_id: id,
@@ -70,7 +83,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const clickId = crypto.randomBytes(8).toString('hex');
   const affiliateUrl = buildAffiliateUrl({
-    merchant: { network: merchant.network || undefined, program_id: merchant.program_id || undefined, domain: merchant.domain },
+    merchant: {
+      network: merchant.network || undefined,
+      program_id: merchant.program_id || undefined,
+      domain: merchant.domain,
+    },
     rawUrl: offer.url,
     clickId,
     channel,

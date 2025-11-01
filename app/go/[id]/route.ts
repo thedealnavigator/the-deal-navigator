@@ -5,14 +5,25 @@ import { buildAffiliateUrl } from '@/lib/affiliates';
 import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
-// optional: if you want to avoid caching for safety
-// export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic'; // avoid prerender/caching issues
+
+type ParamsObj = { id: string };
+function isPromiseLike<T>(v: unknown): v is Promise<T> {
+  return !!v && typeof (v as any).then === 'function';
+}
 
 export async function GET(
   req: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: { params: unknown } // accept ANY; we'll normalize below
 ): Promise<Response> {
-  const { id } = await context.params;
+  // Normalize params: supports both { id } and Promise<{ id }>
+  const rawParams = context?.params as unknown;
+  const params: ParamsObj = isPromiseLike<ParamsObj>(rawParams)
+    ? await rawParams
+    : (rawParams as ParamsObj);
+
+  const id = params?.id;
+  if (!id) return NextResponse.redirect('/', { status: 302 });
 
   const sb = supabaseAdmin();
   const url = new URL(req.url);
@@ -21,11 +32,16 @@ export async function GET(
 
   // Try product id first
   let productId: string | null = null;
-  const { data: productRow } = await sb.from('products').select('id').eq('id', id).maybeSingle();
+  const { data: productRow } = await sb
+    .from('products')
+    .select('id')
+    .eq('id', id)
+    .maybeSingle();
+
   if (productRow?.id) {
     productId = productRow.id;
   } else {
-    // Fallback: treat as deal id (legacy path)
+    // Fallback: treat as legacy deal id
     const { data: deal } = await sb
       .from('deals')
       .select('id, product_id, url')
@@ -37,6 +53,7 @@ export async function GET(
     if (deal.product_id) {
       productId = deal.product_id;
     } else {
+      // No product yet — log minimal click and bounce to raw URL
       const clickId = crypto.randomBytes(8).toString('hex');
       await sb.from('clicks').insert({
         deal_id: id,

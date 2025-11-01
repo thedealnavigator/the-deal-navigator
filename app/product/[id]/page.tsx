@@ -58,10 +58,10 @@ export default async function ProductPage({ params }: { params: { id: string } }
                 <p className="text-neutral-600 text-sm mt-1">{product.brand || ''} {product.model || ''}</p>
               )}
               {product.tags?.length ? (
-                <div className="mt-2 text-xs text-neutral-600">
-                  {product.tags.map(t => <span key={t} className="mr-2 px-2 py-1 rounded-full border">{t}</span>)}
-                </div>
-              ) : null}
+  <div className="mt-2 text-xs text-neutral-600">
+    {product.tags.map(t => <span key={t} className="mr-2 px-2 py-1 rounded-full border">{t}</span>)}
+  </div>
+) : null}
             </div>
           </div>
         </div>
